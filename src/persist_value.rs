@@ -14,7 +14,7 @@ impl PersistValue {
     pub fn new(new_data: Box<[u8]>, filepath: PathBuf) -> Result<Self> {
         atomic_write(&*new_data, &filepath)?;
 
-        Ok(PersistValue {
+        Ok(Self {
             data: new_data,
             fp: filepath,
         })
@@ -24,7 +24,7 @@ impl PersistValue {
         let data = fs::read(filepath)
             .with_context(|| format!("Failed to read file: {:?}", filepath))?;
         
-        Ok(PersistValue {
+        Ok(Self {
             data: data.into_boxed_slice(),
             fp: filepath.to_path_buf(),
         })
