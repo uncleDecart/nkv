@@ -1,12 +1,13 @@
-use std::fs;
-use std::path::{Path, PathBuf};
 use tempfile::{TempDir, NamedTempFile};
+use std::path::{Path, PathBuf};
 use anyhow::{Result, Context};
+use std::sync::Arc;
 use std::io::Write;
+use std::fs;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct PersistValue {
-    data: Box<[u8]>,
+    data: Arc<[u8]>,
     fp: PathBuf,
 }
 
@@ -15,7 +16,7 @@ impl PersistValue {
         atomic_write(&*new_data, &filepath)?;
 
         Ok(Self {
-            data: new_data,
+            data: Arc::from(new_data),
             fp: filepath,
         })
     }
@@ -25,7 +26,7 @@ impl PersistValue {
             .with_context(|| format!("Failed to read file: {:?}", filepath))?;
         
         Ok(Self {
-            data: data.into_boxed_slice(),
+            data: data.into_boxed_slice().into(),
             fp: filepath.to_path_buf(),
         })
     }
@@ -33,7 +34,7 @@ impl PersistValue {
     pub fn update(&mut self, new_data: Box<[u8]>) -> Result<()> {
         atomic_write(&*new_data, &self.fp)?;
 
-        self.data = new_data;
+        self.data = new_data.into();
         Ok(())
     }
 
@@ -43,8 +44,8 @@ impl PersistValue {
         Ok(())
     }
 
-    pub fn data(&self) -> &[u8] {
-        &self.data
+    pub fn data(&self) -> Arc<[u8]> {
+        Arc::clone(&self.data)
     }
 }
 
@@ -106,7 +107,7 @@ mod tests {
         let data_from_file = fs::read(file_path.clone())?;
         assert_eq!(data_from_file, new_data.as_ref());
 
-        assert_eq!(persist_value.data(), new_data.as_ref());
+        assert_eq!(persist_value.data(), new_data.as_ref().into());
 
         temp_dir.close()?;
 
