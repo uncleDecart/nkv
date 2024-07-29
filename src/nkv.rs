@@ -101,4 +101,41 @@ mod tests {
 
         Ok(())
     }
+
+    #[tokio::test]
+    async fn test_concurrent_writes() -> Result<()> {
+        let temp_dir = TempDir::new()?;
+        let nkv = Arc::new(NotifyKeyValue::new(temp_dir.path().to_path_buf()));
+
+        let key1 = "key1";
+        let value1: Box<[u8]> = Box::new([1, 2, 3, 4]);
+        let key2 = "key2";
+        let value2: Box<[u8]> = Box::new([5, 6, 7, 8]);
+
+        let kv_store_clone1 = Arc::clone(&nkv);
+        let kv_store_clone2 = Arc::clone(&nkv);
+
+        let v1 = value1.clone();
+        let task1 = tokio::spawn(async move {
+            kv_store_clone1.put(key1, v1).await;
+        });
+
+        let v2 = value2.clone();
+        let task2 = tokio::spawn(async move {
+            kv_store_clone2.put(key2, v2.clone()).await;
+        });
+
+        task1.await.unwrap();
+        task2.await.unwrap();
+
+        let result1 = nkv.get(key1).await;
+        assert!(result1.is_some());
+        assert_eq!(&*result1.unwrap(), value1.as_ref());
+
+        let result2 = nkv.get(key2).await;
+        assert!(result2.is_some());
+        assert_eq!(&*result2.unwrap(), value2.as_ref());
+
+        Ok(())
+    }
 }
