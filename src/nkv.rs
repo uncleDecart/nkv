@@ -125,8 +125,7 @@ mod tests {
             kv_store_clone2.put(key2, v2.clone()).await;
         });
 
-        task1.await.unwrap();
-        task2.await.unwrap();
+        tokio::join!(task1, task2).0.unwrap();
 
         let result1 = nkv.get(key1).await;
         assert!(result1.is_some());
