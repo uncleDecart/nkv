@@ -6,36 +6,61 @@ use std::sync::Arc;
 use tokio::sync::RwLock;
 
 use crate::persist_value::PersistValue;
+use crate::notifier::Notifier;
+
+struct Value {
+    pv: PersistValue,
+    notifier: Notifier,
+}
 
 pub struct NotifyKeyValue {
-    state: Arc<RwLock<HashMap<String, PersistValue>>>,
+    state: Arc<RwLock<HashMap<String, Value>>>,
     persist_path:  PathBuf,
+    sock_path: String,
 }
 
 impl NotifyKeyValue {
     pub fn new(path: std::path::PathBuf) -> Self {
+        let temp_dir = TempDir::new().unwrap();
+
         Self{
             state: Arc::new(RwLock::new(HashMap::new())),
             persist_path: path,
+            sock_path: "nats://localhost:4222".to_string(),
         }
     }
 
     pub async fn put(&self, key: &str, value: Box<[u8]>) {
         let mut map = self.state.write().await;
 
-        let path = self.persist_path.join(key);
-        let val = PersistValue::new(value, path);
-        map.insert(key.to_string(), val.expect("TOREMOVE"));
+        if let Some(val) = map.get_mut(key) {
+            val.pv.update(value);
+            val.notifier.send_update(&*val.pv.data());
+        } else {
+            let path = self.persist_path.join(key);
+            let val = PersistValue::new(value, path).expect("TOREMOVE");
+
+            let notifier = Notifier::new(self.sock_path.clone()).expect("TOREMOVE");
+            map.insert(key.to_string(), Value{
+                pv: val,
+                notifier: notifier,
+            });
+        }
     }
 
     pub async fn get(&self, key: &str) -> Option<Arc<[u8]>> {
         let map = self.state.read().await;
-        map.get(key).map(|value| Arc::clone(&value.data()))
+        map.get(key).map(|value| Arc::clone(&value.pv.data()))
     }
 
     pub async fn delete(&self, key: &str) {
         let mut map = self.state.write().await;
         map.remove(key);
+    }
+
+    pub async fn update_addr(&self, key: &str) -> Option<String> {
+        let map = self.state.read().await;
+        map.get(key).map(|value| value.notifier.addr())
     }
 }
 

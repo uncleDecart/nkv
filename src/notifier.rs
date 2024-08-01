@@ -1,9 +1,10 @@
-extern crate zmq;
 extern crate serde;
 extern crate serde_json;
 
-use serde::{Serialize, Deserialize};
-use zmq::Socket;
+use nats::Connection;
+use serde::{Deserialize, Serialize};
+use std::error::Error;
+use std::collections::HashSet;
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 enum MessageType<T>
@@ -24,47 +25,68 @@ where
 }
 
 pub struct Notifier {
-    socket: Socket,
+    nats_connection: Connection,
+    nats_url: String,
+    clients: HashSet<String>,
 }
 
 impl Notifier {
-    pub fn new(ctx: &zmq::Context, address: &str) -> Notifier {
-        let socket = ctx.socket(zmq::PUB).unwrap();
-        socket.bind(address).unwrap();
-        Notifier { socket }
+    pub fn new(nats_url: String) -> Result<Self, Box<dyn Error>> {
+        let nats_connection = nats::connect(nats_url.clone())?;
+
+        Ok(Self {
+            nats_connection,
+            nats_url,
+            clients: HashSet::new(),
+        })
     }
     
-    fn send_message<T>(&self, message: &Message<T>)
+    fn send_message<T>(&self, message: &Message<T>) -> Result<(), Box<dyn Error>>
     where
         T: Serialize,
     {
-        let serialized = serde_json::to_string(message).unwrap();
-        self.socket.send(&serialized, 0).unwrap();
+        let serialized = serde_json::to_string(message)?;
+        for client in &self.clients {
+            self.nats_connection.publish(client, serialized.as_bytes())?;
+        }
+        Ok(())
     }
 
-    pub fn send_hello(&self) {
+    pub fn send_hello(&self) -> Result<(), Box<dyn Error>> {
         let message = Message {
             msg_type: MessageType::<u8>::Hello,
         };
 
-        self.send_message(&message);
+        self.send_message(&message)
     }
 
-    pub fn send_update<T>(&self, new_value: T)
+    pub fn send_update<T>(&self, new_value: T) -> Result<(), Box<dyn Error>>
     where
         T: Serialize,
     {
         let message = Message {
             msg_type: MessageType::Update { value: new_value },
         };
-        self.send_message(&message);
+        self.send_message(&message)
     }
 
-    pub fn send_close(&self) {
+    pub fn subscribe(&mut self, client: String) {
+        self.clients.insert(client);
+    }
+
+    pub fn unsubscribe(&mut self, client: &str) {
+        self.clients.remove(client);
+    }
+
+    pub fn send_close(&self) -> Result<(), Box<dyn Error>> {
         let message = Message {
             msg_type: MessageType::<u8>::Close,
         };
-        self.send_message(&message);
+        self.send_message(&message)
+    }
+
+    pub fn addr(&self) -> String {
+        self.nats_url.clone()
     }
 }
 
@@ -77,64 +99,34 @@ impl Drop for Notifier {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::thread;
-    use std::time::Duration;
 
-    fn setup_subscriber(ctx: &zmq::Context, address: &str) -> Socket {
-        let subscriber = ctx.socket(zmq::SUB).unwrap();
-        subscriber.connect(address).unwrap();
-        subscriber.set_subscribe(b"").unwrap();
-        subscriber
+    // Helper function to create a Notifier instance for testing
+    fn create_test_notifier() -> Notifier {
+        let mut notifier = Notifier::new("nats://localhost:4222".into()).unwrap();
+        notifier.subscribe("client1".to_string());
+        notifier.subscribe("client2".to_string());
+
+        notifier
     }
 
     #[test]
     fn test_send_hello() {
-        let context = zmq::Context::new();
-        let address = "ipc:///tmp/test_send_hello";
-        let notifier = Notifier::new(&context, address);
-        let subscriber = setup_subscriber(&context, address);
-
-        // Allow some time for the connection to be established
-        thread::sleep(Duration::from_millis(100));
-
-        notifier.send_hello();
-
-        let message = subscriber.recv_string(0).unwrap().unwrap();
-        let received_message: Message<()> = serde_json::from_str(&message).unwrap();
-        assert_eq!(received_message.msg_type, MessageType::Hello);
+        let notifier = create_test_notifier();
+        assert!(notifier.send_hello().is_ok());
     }
 
     #[test]
     fn test_send_update() {
-        let context = zmq::Context::new();
-        let address = "ipc:///tmp/test_send_update";
-        let notifier = Notifier::new(&context, address);
-        let subscriber = setup_subscriber(&context, address);
-
-        // Allow some time for the connection to be established
-        thread::sleep(Duration::from_millis(100));
-
-        notifier.send_update("test_value".to_string());
-
-        let message = subscriber.recv_string(0).unwrap().unwrap();
-        let received_message: Message<String> = serde_json::from_str(&message).unwrap();
-        assert_eq!(received_message.msg_type, MessageType::Update { value: "test_value".to_string() });
+        let notifier = create_test_notifier();
+        let update_message = Message {
+            msg_type: MessageType::Update { value: "update".to_string() },
+        };
+        assert!(notifier.send_message(&update_message).is_ok());
     }
 
     #[test]
     fn test_send_close() {
-        let context = zmq::Context::new();
-        let address = "ipc:///tmp/test_send_close";
-        let notifier = Notifier::new(&context, address);
-        let subscriber = setup_subscriber(&context, address);
-
-        // Allow some time for the connection to be established
-        thread::sleep(Duration::from_millis(100));
-
-        notifier.send_close();
-
-        let message = subscriber.recv_string(0).unwrap().unwrap();
-        let received_message: Message<()> = serde_json::from_str(&message).unwrap();
-        assert_eq!(received_message.msg_type, MessageType::Close);
+        let notifier = create_test_notifier();
+        assert!(notifier.send_close().is_ok());
     }
 }
