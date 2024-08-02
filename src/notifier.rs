@@ -92,7 +92,7 @@ impl Notifier {
 
 impl Drop for Notifier {
     fn drop(&mut self) {
-        self.send_close();
+        let _ = self.send_close();
     }
 }
 
