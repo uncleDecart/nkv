@@ -13,6 +13,15 @@ pub enum NotifyKeyValueError {
     NotFound,
 }
 
+impl NotifyKeyValueError {
+    pub fn to_http_status(&self) -> http::StatusCode {
+        match self {
+            NotifyKeyValueError::NotFound => http::StatusCode::NOT_FOUND,
+            NotifyKeyValueError::NoError => http::StatusCode::OK,
+        }
+    }
+}
+
 impl fmt::Display for NotifyKeyValueError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -69,12 +78,12 @@ impl NotifyKeyValue {
         self.state.remove(key);
     }
 
-    pub fn subscribe(&self, key: String) {
-        self.state.get(key).map(|value| value.notifier.subscribe(key))
+    pub fn subscribe(&mut self, key: String) {
+        self.state.get_mut(&key).map(|value| value.notifier.subscribe(key));
     }
 
-    pub fn unsubscribe(&self, key: &str) {
-        self.state.get(key).map(|value| value.notifier.unsubscribe(key))
+    pub fn unsubscribe(&mut self, key: &str) {
+        self.state.get_mut(key).map(|value| value.notifier.unsubscribe(key));
     }
 }
 
