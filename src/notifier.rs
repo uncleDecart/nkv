@@ -2,6 +2,7 @@ extern crate serde;
 extern crate serde_json;
 
 use serde::{Deserialize, Serialize};
+use std::env;
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 enum MessageType<T>
@@ -94,7 +95,10 @@ mod tests {
 
     // Helper function to create a Notifier instance for testing
     async fn create_test_notifier() -> Notifier {
-        let notifier = Notifier::new("nats://localhost:4222".into(), "topic".into()).await.unwrap();
+        let nats_url = env::var("NATS_URL")
+                    .unwrap_or_else(|_| "nats://localhost:4222".to_string());
+
+        let notifier = Notifier::new(nats_url, "topic".into()).await.unwrap();
         notifier
     }
 

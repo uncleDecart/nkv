@@ -6,6 +6,7 @@ use std::sync::Arc;
 use crate::persist_value::PersistValue;
 use crate::notifier::Notifier;
 use std::fmt;
+use std::env;
 
 #[derive(Debug, PartialEq)]
 pub enum NotifyKeyValueError {
@@ -47,10 +48,12 @@ pub struct NotifyKeyValue {
 
 impl NotifyKeyValue {
     pub fn new(path: std::path::PathBuf) -> Self {
+        let nats_url = env::var("NATS_URL")
+                    .unwrap_or_else(|_| "nats://localhost:4222".to_string());
         Self{
             state: HashMap::new(),
             persist_path: path,
-            sock_path: "nats://localhost:4222".to_string(),
+            sock_path: nats_url,
         }
     }
 

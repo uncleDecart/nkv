@@ -7,6 +7,7 @@ use crate::nkv::{self, NotifyKeyValue};
 use crate::request_msg::{self, BaseResp, GetResp, PutResp, ServerResponse};
 use http::StatusCode;
 use futures::StreamExt;
+use std::env;
 
 pub struct PutMsg {
     key: String,
@@ -254,7 +255,10 @@ mod tests {
     #[tokio::test]
     async fn test_server() {
         let temp_dir = TempDir::new().expect("Failed to create temporary directory");
-        let srv = Server::new("localhost:4222".to_string(), temp_dir.path().to_path_buf()).await.unwrap();
+        let nats_url = env::var("NATS_URL")
+                    .unwrap_or_else(|_| "nats://localhost:4222".to_string());
+
+        let srv = Server::new(nats_url.to_string(), temp_dir.path().to_path_buf()).await.unwrap();
 
         let put_tx = srv.put_tx();
         let get_tx = srv.get_tx();
@@ -289,9 +293,11 @@ mod tests {
         let temp_dir = TempDir::new().expect("Failed to create temporary directory");
 
         // creates background task where it serves threads
-        let _srv = Server::new("localhost:4222".to_string(), temp_dir.path().to_path_buf()).await.unwrap();
+        let nats_url = env::var("NATS_URL")
+                    .unwrap_or_else(|_| "nats://localhost:4222".to_string());
 
-        let nats_url = "localhost:4222".to_string();
+        let _srv = Server::new(nats_url.clone(), temp_dir.path().to_path_buf()).await.unwrap();
+
         let client = NatsClient::new(&nats_url).await.unwrap();
 
         let value: Box<[u8]> = Box::new([1, 2, 3, 4, 5]);
