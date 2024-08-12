@@ -54,7 +54,7 @@ impl NotifyKeyValue {
         }
     }
 
-    pub fn put(&mut self, key: &str, value: Box<[u8]>) {
+    pub async fn put(&mut self, key: &str, value: Box<[u8]>) {
         if let Some(val) = self.state.get_mut(key) {
             let _ = val.pv.update(value);
             let _ = val.notifier.send_update(&*val.pv.data());
@@ -62,7 +62,7 @@ impl NotifyKeyValue {
             let path = self.persist_path.join(key);
             let val = PersistValue::new(value, path).expect("TOREMOVE");
 
-            let notifier = Notifier::new(self.sock_path.clone()).expect("TOREMOVE");
+            let notifier = Notifier::new(self.sock_path.clone(), format!("pub-{}", key).into()).await.expect("TOREMOVE");
             self.state.insert(key.to_string(), Value{
                 pv: val,
                 notifier: notifier,
@@ -78,12 +78,8 @@ impl NotifyKeyValue {
         self.state.remove(key);
     }
 
-    pub fn subscribe(&mut self, key: String) {
-        self.state.get_mut(&key).map(|value| value.notifier.subscribe(key));
-    }
-
-    pub fn unsubscribe(&mut self, key: &str) {
-        self.state.get_mut(key).map(|value| value.notifier.unsubscribe(key));
+    pub fn subscribe(&mut self, key: String) -> String {
+        self.state.get(&key).map(|value| value.notifier.topic()).expect("REASON")
     }
 }
 
@@ -100,7 +96,7 @@ mod tests {
         let mut nkv = NotifyKeyValue::new(temp_dir.path().to_path_buf());
 
         let data: Box<[u8]> = Box::new([1, 2, 3, 4, 5]);
-        nkv.put("key1", data.clone());
+        nkv.put("key1", data.clone()).await;
 
         let result = nkv.get("key1");
         assert_eq!(result, Some(Arc::from(data)));
@@ -125,7 +121,7 @@ mod tests {
         let mut nkv = NotifyKeyValue::new(temp_dir.path().to_path_buf());
 
         let data: Box<[u8]> = Box::new([1, 2, 3, 4, 5]);
-        nkv.put("key1", data.clone());
+        nkv.put("key1", data.clone()).await;
 
         nkv.delete("key1");
         let result = nkv.get("key1");
@@ -140,10 +136,10 @@ mod tests {
         let mut nkv = NotifyKeyValue::new(temp_dir.path().to_path_buf());
 
         let data: Box<[u8]> = Box::new([1, 2, 3, 4, 5]);
-        nkv.put("key1", data);
+        nkv.put("key1", data).await;
 
         let new_data: Box<[u8]> = Box::new([5, 6, 7, 8, 9]);
-        nkv.put("key1", new_data.clone());
+        nkv.put("key1", new_data.clone()).await;
 
         let result = nkv.get("key1");
         assert_eq!(result, Some(Arc::from(new_data)));

@@ -3,7 +3,7 @@ mod nkv;
 mod notifier;
 mod srv;
 mod request_msg;
+mod client;
 
-fn main() {
-    println!("Hello, world!");
-}
+#[tokio::main]
+async fn main() { }

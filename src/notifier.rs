@@ -1,10 +1,7 @@
 extern crate serde;
 extern crate serde_json;
 
-use nats::Connection;
 use serde::{Deserialize, Serialize};
-use std::error::Error;
-use std::collections::HashSet;
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 enum MessageType<T>
@@ -25,68 +22,63 @@ where
 }
 
 pub struct Notifier {
-    nats_connection: Connection,
+    nats_connection: async_nats::Client,
     nats_url: String,
-    clients: HashSet<String>,
+    topic: String,
 }
 
 impl Notifier {
-    pub fn new(nats_url: String) -> Result<Self, Box<dyn Error>> {
-        let nats_connection = nats::connect(nats_url.clone())?;
+    pub async fn new(nats_url: String, topic: String) -> Result<Self, async_nats::Error> {
+        let nats_connection = async_nats::connect(&nats_url).await?;
 
         Ok(Self {
             nats_connection,
             nats_url,
-            clients: HashSet::new(),
+            topic
         })
     }
     
-    fn send_message<T>(&self, message: &Message<T>) -> Result<(), Box<dyn Error>>
+    async fn send_message<T>(&self, message: &Message<T>) -> Result<(), async_nats::Error>
     where
         T: Serialize,
     {
         let serialized = serde_json::to_string(message)?;
-        for client in &self.clients {
-            self.nats_connection.publish(client, serialized.as_bytes())?;
-        }
+
+        // Publish the message to the NATS topic
+        self.nats_connection
+            .publish(self.topic.clone(), serialized.into())
+            .await?;
+    
         Ok(())
     }
 
-    pub fn send_hello(&self) -> Result<(), Box<dyn Error>> {
+    pub async fn send_hello(&self) -> Result<(), async_nats::Error> {
         let message = Message {
             msg_type: MessageType::<u8>::Hello,
         };
 
-        self.send_message(&message)
+        self.send_message(&message).await
     }
 
-    pub fn send_update<T>(&self, new_value: T) -> Result<(), Box<dyn Error>>
+    pub async fn send_update<T>(&self, new_value: T) -> Result<(), async_nats::Error>
     where
         T: Serialize,
     {
         let message = Message {
             msg_type: MessageType::Update { value: new_value },
         };
-        self.send_message(&message)
+        self.send_message(&message).await
     }
 
-    pub fn subscribe(&mut self, client: String) {
-        self.clients.insert(client);
-    }
-
-    pub fn unsubscribe(&mut self, client: &str) {
-        self.clients.remove(client);
-    }
-
-    pub fn send_close(&self) -> Result<(), Box<dyn Error>> {
+    pub async fn send_close(&self) -> Result<(), async_nats::Error> {
         let message = Message {
             msg_type: MessageType::<u8>::Close,
         };
-        self.send_message(&message)
+        self.send_message(&message).await
     }
 
-    pub fn addr(&self) -> String {
-        self.nats_url.clone()
+    pub fn topic(&self) -> String {
+        self.topic.clone()
     }
 }
 
@@ -101,32 +93,29 @@ mod tests {
     use super::*;
 
     // Helper function to create a Notifier instance for testing
-    fn create_test_notifier() -> Notifier {
-        let mut notifier = Notifier::new("nats://localhost:4222".into()).unwrap();
-        notifier.subscribe("client1".to_string());
-        notifier.subscribe("client2".to_string());
-
+    async fn create_test_notifier() -> Notifier {
+        let notifier = Notifier::new("nats://localhost:4222".into(), "topic".into()).await.unwrap();
         notifier
     }
 
-    #[test]
-    fn test_send_hello() {
-        let notifier = create_test_notifier();
-        assert!(notifier.send_hello().is_ok());
+    #[tokio::test]
+    async fn test_send_hello() {
+        let notifier = create_test_notifier().await;
+        assert!(notifier.send_hello().await.is_ok());
     }
 
-    #[test]
-    fn test_send_update() {
-        let notifier = create_test_notifier();
+    #[tokio::test]
+    async fn test_send_update() {
+        let notifier = create_test_notifier().await;
         let update_message = Message {
             msg_type: MessageType::Update { value: "update".to_string() },
         };
-        assert!(notifier.send_message(&update_message).is_ok());
+        assert!(notifier.send_message(&update_message).await.is_ok());
     }
 
-    #[test]
-    fn test_send_close() {
-        let notifier = create_test_notifier();
-        assert!(notifier.send_close().is_ok());
+    #[tokio::test]
+    async fn test_send_close() {
+        let notifier = create_test_notifier().await;
+        assert!(notifier.send_close().await.is_ok());
     }
 }
