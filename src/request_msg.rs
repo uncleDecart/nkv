@@ -47,7 +47,6 @@ pub struct PutResp {
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq)]
-#[serde(untagged)]
 pub enum ServerResponse {
     Base(BaseResp),
     Get(GetResp),

@@ -56,8 +56,9 @@ impl NatsClient {
         let reply = self.client
             .request(subj, req.into())
             .await?;
+
         
-         let response_data: ServerResponse = serde_json::from_slice(&reply.payload)?;
-         Ok(response_data)
+        let response_data: ServerResponse = serde_json::from_slice(&reply.payload)?;
+        Ok(response_data)
     }
 }

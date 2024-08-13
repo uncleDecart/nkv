@@ -174,9 +174,9 @@ impl Server {
                         status: nkv_resp.err.to_http_status(),
                         message: nkv_resp.err.to_string(),
                     },
-                    data: data,
+                    data: data.clone(),
                 };
-                ServerResponse::Get(resp) 
+                ServerResponse::Get(resp)
             }
             _ => { 
                 let resp = BaseResp {
@@ -300,7 +300,7 @@ mod tests {
 
         let client = NatsClient::new(&nats_url).await.unwrap();
 
-        let value: Box<[u8]> = Box::new([1, 2, 3, 4, 5]);
+        let value: Box<[u8]> = Box::new([9, 7, 3, 4, 5]);
         let key = "test_2_key1".to_string();
 
         let resp = client.put(key.clone(), value.clone()).await.unwrap();
@@ -308,6 +308,42 @@ mod tests {
             id: 0,
             status: http::StatusCode::OK,
             message: "No Error".to_string(),
-        }))
+        }));
+
+        let get_resp = client.get(key.clone()).await.unwrap();
+        assert_eq!(get_resp, request_msg::ServerResponse::Get(request_msg::GetResp{
+            base: request_msg::BaseResp {
+                id: 0,
+                status: http::StatusCode::OK,
+                message: "No Error".to_string(),
+            },
+            data: value.to_vec(),
+        }));
+
+        let err_get_resp = client.get("non-existent-key".to_string()).await.unwrap();
+        assert_eq!(err_get_resp, request_msg::ServerResponse::Get(request_msg::GetResp{
+            base: request_msg::BaseResp {
+                id: 0,
+                status: http::StatusCode::NOT_FOUND,
+                message: "Not Found".to_string(),  
+            },
+            data: Vec::new(),
+        }));
+
+        let del_resp = client.delete(key.clone()).await.unwrap();
+        assert_eq!(resp, request_msg::ServerResponse::Base(request_msg::BaseResp{
+            id: 0,
+            status: http::StatusCode::OK,
+            message: "No Error".to_string(),
+        }));
+        let del_get_resp = client.get(key.clone()).await.unwrap();
+        assert_eq!(del_get_resp, request_msg::ServerResponse::Get(request_msg::GetResp{
+            base: request_msg::BaseResp {
+                id: 0,
+                status: http::StatusCode::NOT_FOUND,
+                message: "Not Found".to_string(),  
+            },
+            data: Vec::new(),
+        }));
     }
 }
