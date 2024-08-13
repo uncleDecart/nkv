@@ -2,7 +2,6 @@ extern crate serde;
 extern crate serde_json;
 
 use serde::{Deserialize, Serialize};
-use std::env;
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
 enum MessageType<T>
@@ -92,6 +91,7 @@ impl Drop for Notifier {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::env;
 
     // Helper function to create a Notifier instance for testing
     async fn create_test_notifier() -> Notifier {

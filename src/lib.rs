@@ -1,3 +1,8 @@
+pub mod nkv;
+mod notifier;
+pub mod request_msg;
+mod persist_value;
+
 use crate::request_msg::*;
 
 pub struct NatsClient {

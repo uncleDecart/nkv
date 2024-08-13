@@ -1,13 +1,11 @@
-use tempfile::TempDir;
 use tokio::{task, sync::mpsc };
 
 use std::sync::Arc;
 
-use crate::nkv::{self, NotifyKeyValue};
-use crate::request_msg::{self, BaseResp, DataResp, ServerResponse};
+use ::nkv::nkv;
+use ::nkv::request_msg::{self, BaseMessage, PutMessage, ServerResponse};
 use http::StatusCode;
 use futures::StreamExt;
-use std::env;
 
 pub struct PutMsg {
     key: String,
@@ -56,7 +54,7 @@ impl Server {
         let (sub_tx, mut sub_rx) = mpsc::unbounded_channel::<SubMsg>();
         let (_cancel_tx, mut cancel_rx) = mpsc::unbounded_channel::<BaseMsg>();
 
-        let mut nkv = NotifyKeyValue::new(path);
+        let mut nkv = nkv::NotifyKeyValue::new(path);
 
         let nc = async_nats::connect(nats_url.clone()).await?;
         let mut sub = nc.subscribe("pubsub.*").await.unwrap();
@@ -84,7 +82,7 @@ impl Server {
                             "pubsub.put" => Self::handle_put(put_tx, json_body).await, 
                             "pubsub.delete" => Self::handle_basic_msg(del_tx, json_body).await,
                             "pubsub.subscribe" => Self::handle_sub(sub_tx, json_body).await, 
-                            _ => ServerResponse::Base(BaseResp{id: 0, status: StatusCode::OK, message: "tmp".to_string()}),
+                            _ => ServerResponse::Base(request_msg::BaseResp{id: 0, status: StatusCode::OK, message: "tmp".to_string()}),
                         };
                         let json_reply = serde_json::to_string(&reply).unwrap();
                         let _ = nc.publish(reply_to, json_reply.into()).await;
@@ -142,7 +140,7 @@ impl Server {
                 // TODO: handle error and throw response
                 let _ = nkv_tx.send(PutMsg{key: base.key, value: value , resp_tx: resp_tx});
                 let nkv_resp = resp_rx.recv().await.unwrap();
-                let resp = BaseResp {
+                let resp = request_msg::BaseResp {
                     id: base.id,
                     status: nkv_resp.to_http_status(),
                     message: nkv_resp.to_string(),
@@ -150,7 +148,7 @@ impl Server {
                 ServerResponse::Base(resp) 
             }
             _ => { 
-                let resp = BaseResp {
+                let resp = request_msg::BaseResp {
                     id: 0,
                     status: StatusCode::INTERNAL_SERVER_ERROR,
                     message: "wrong message for put handle".to_string(),
@@ -170,8 +168,8 @@ impl Server {
                 if let Some(v) = nkv_resp.value {
                     data = v.to_vec();
                 }
-                let resp = DataResp {
-                    base: BaseResp {
+                let resp = request_msg::DataResp {
+                    base: request_msg::BaseResp {
                         id: id,
                         status: nkv_resp.err.to_http_status(),
                         message: nkv_resp.err.to_string(),
@@ -181,7 +179,7 @@ impl Server {
                 ServerResponse::Get(resp)
             }
             _ => { 
-                let resp = BaseResp {
+                let resp = request_msg::BaseResp {
                     id: 0,
                     status: StatusCode::INTERNAL_SERVER_ERROR,
                     message: "wrong message for get  handle".to_string(),
@@ -197,7 +195,7 @@ impl Server {
                 let (resp_tx, mut resp_rx) = mpsc::channel(1);
                 let _ = nkv_tx.send(BaseMsg{key: key, resp_tx: resp_tx});
                 let nkv_resp = resp_rx.recv().await.unwrap();
-                let resp = BaseResp {
+                let resp = request_msg::BaseResp {
                     id: id,
                     status: nkv_resp.to_http_status(),
                     message: nkv_resp.to_string(),
@@ -205,7 +203,7 @@ impl Server {
                 ServerResponse::Base(resp) 
             }
             _ => { 
-                let resp = BaseResp {
+                let resp = request_msg::BaseResp {
                     id: 0,
                     status: StatusCode::INTERNAL_SERVER_ERROR,
                     message: "wrong message for the handle".to_string(),
@@ -221,8 +219,8 @@ impl Server {
                 let (resp_tx, mut resp_rx) = mpsc::channel(1);
                 let _ = nkv_tx.send(SubMsg{key: key, resp_tx: resp_tx});
                 let nkv_resp = resp_rx.recv().await.unwrap();
-                let resp = DataResp {
-                    base: BaseResp {
+                let resp =  request_msg::DataResp {
+                    base: request_msg::BaseResp {
                         id: id,
                         status: nkv_resp.err.to_http_status(),
                         message: nkv_resp.err.to_string(),
@@ -232,7 +230,7 @@ impl Server {
                 ServerResponse::Put(resp) 
             }
             _ => { 
-                let resp = BaseResp {
+                let resp = request_msg::BaseResp {
                     id: 0,
                     status: StatusCode::INTERNAL_SERVER_ERROR,
                     message: "wrong message for sub handle".to_string(),
@@ -251,9 +249,11 @@ impl Server {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::env;
+    use tempfile::TempDir;
     use tokio;
-    use crate::client::NatsClient;
-
+    use ::nkv::NatsClient;
+    
     #[tokio::test]
     async fn test_server() {
         let temp_dir = TempDir::new().expect("Failed to create temporary directory");
