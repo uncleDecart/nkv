@@ -33,22 +33,17 @@ pub struct BaseResp {
 }
 
 #[derive(Debug, Deserialize, Serialize, PartialEq)]
-pub struct GetResp {
+pub struct DataResp {
     #[serde(flatten)]
     pub base: BaseResp,    
     pub data: Vec<u8>,
 }
 
-#[derive(Debug, Deserialize, Serialize, PartialEq)]
-pub struct PutResp {
-    #[serde(flatten)]
-    pub base: BaseResp,    
-    pub data: String,
-}
 
 #[derive(Debug, Deserialize, Serialize, PartialEq)]
 pub enum ServerResponse {
     Base(BaseResp),
-    Get(GetResp),
-    Put(PutResp),
+    Get(DataResp),
+    Put(DataResp),
+    Sub(DataResp),
 }

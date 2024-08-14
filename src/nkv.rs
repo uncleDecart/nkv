@@ -81,8 +81,8 @@ impl NotifyKeyValue {
         self.state.remove(key);
     }
 
-    pub fn subscribe(&mut self, key: String) -> String {
-        self.state.get(&key).map(|value| value.notifier.topic()).expect("REASON")
+    pub fn subscribe(&mut self, key: &str) -> Option<String> {
+        self.state.get(key).map(|value| value.notifier.topic())
     }
 }
 

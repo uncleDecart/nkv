@@ -4,7 +4,7 @@ use tokio::{task, sync::mpsc };
 use std::sync::Arc;
 
 use crate::nkv::{self, NotifyKeyValue};
-use crate::request_msg::{self, BaseResp, GetResp, PutResp, ServerResponse};
+use crate::request_msg::{self, BaseResp, DataResp, ServerResponse};
 use http::StatusCode;
 use futures::StreamExt;
 use std::env;
@@ -118,11 +118,13 @@ impl Server {
                         let _ = req.resp_tx.send(nkv::NotifyKeyValueError::NoError).await;
                     }
                     Some(req) = sub_rx.recv() => {
-                        let topic = nkv.subscribe(req.key);
-                        let _ = req.resp_tx.send(NkvSubResp {
-                            value: topic,
-                            err: nkv::NotifyKeyValueError::NoError,
-                        }).await;
+                        let mut value = "".to_string();
+                        let mut err = nkv::NotifyKeyValueError::NotFound;
+                        if let Some(topic) = nkv.subscribe(&req.key) {
+                            value = topic;
+                            err = nkv::NotifyKeyValueError::NoError;
+                        }
+                        let _ = req.resp_tx.send(NkvSubResp { value, err }).await;
                     }
                     Some(_) = cancel_rx.recv() => { cancelled = true }
                     else => { break; }
@@ -168,13 +170,13 @@ impl Server {
                 if let Some(v) = nkv_resp.value {
                     data = v.to_vec();
                 }
-                let resp = GetResp {
+                let resp = DataResp {
                     base: BaseResp {
                         id: id,
                         status: nkv_resp.err.to_http_status(),
                         message: nkv_resp.err.to_string(),
                     },
-                    data: data.clone(),
+                    data: data,
                 };
                 ServerResponse::Get(resp)
             }
@@ -215,17 +217,17 @@ impl Server {
 
     async fn handle_sub(nkv_tx: mpsc::UnboundedSender<SubMsg>, req: request_msg::MessageBody) -> ServerResponse {
         match req {
-            request_msg::MessageBody::Get(request_msg::BaseMessage {id, key}) => {
+            request_msg::MessageBody::Subscribe(request_msg::BaseMessage {id, key}) => {
                 let (resp_tx, mut resp_rx) = mpsc::channel(1);
                 let _ = nkv_tx.send(SubMsg{key: key, resp_tx: resp_tx});
                 let nkv_resp = resp_rx.recv().await.unwrap();
-                let resp = PutResp {
+                let resp = DataResp {
                     base: BaseResp {
                         id: id,
                         status: nkv_resp.err.to_http_status(),
                         message: nkv_resp.err.to_string(),
                     },
-                    data: nkv_resp.value,
+                    data: nkv_resp.value.into_bytes(),
                 };
                 ServerResponse::Put(resp) 
             }
@@ -233,7 +235,7 @@ impl Server {
                 let resp = BaseResp {
                     id: 0,
                     status: StatusCode::INTERNAL_SERVER_ERROR,
-                    message: "wrong message for get  handle".to_string(),
+                    message: "wrong message for sub handle".to_string(),
                 };
                 ServerResponse::Base(resp) 
             }
@@ -311,7 +313,7 @@ mod tests {
         }));
 
         let get_resp = client.get(key.clone()).await.unwrap();
-        assert_eq!(get_resp, request_msg::ServerResponse::Get(request_msg::GetResp{
+        assert_eq!(get_resp, request_msg::ServerResponse::Get(request_msg::DataResp{
             base: request_msg::BaseResp {
                 id: 0,
                 status: http::StatusCode::OK,
@@ -321,13 +323,23 @@ mod tests {
         }));
 
         let err_get_resp = client.get("non-existent-key".to_string()).await.unwrap();
-        assert_eq!(err_get_resp, request_msg::ServerResponse::Get(request_msg::GetResp{
+        assert_eq!(err_get_resp, request_msg::ServerResponse::Get(request_msg::DataResp{
             base: request_msg::BaseResp {
                 id: 0,
                 status: http::StatusCode::NOT_FOUND,
                 message: "Not Found".to_string(),  
             },
             data: Vec::new(),
+        }));
+
+        let sub_resp = client.subscribe(key.clone()).await.unwrap();
+        assert_eq!(sub_resp, request_msg::ServerResponse::Put(request_msg::DataResp{
+            base: request_msg::BaseResp {
+                id: 0,
+                status: http::StatusCode::OK,
+                message: "No Error".to_string(),
+            },
+            data: format!("pub-{}", key).as_bytes().to_vec(),
         }));
 
         let del_resp = client.delete(key.clone()).await.unwrap();
@@ -337,7 +349,7 @@ mod tests {
             message: "No Error".to_string(),
         }));
         let del_get_resp = client.get(key.clone()).await.unwrap();
-        assert_eq!(del_get_resp, request_msg::ServerResponse::Get(request_msg::GetResp{
+        assert_eq!(del_get_resp, request_msg::ServerResponse::Get(request_msg::DataResp{
             base: request_msg::BaseResp {
                 id: 0,
                 status: http::StatusCode::NOT_FOUND,
