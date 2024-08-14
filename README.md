@@ -28,12 +28,54 @@ let client = NatsClient::new(&nats_url).await.unwrap();
 let value: Box<[u8]> = Box::new([1, 2, 3, 4, 5]);
 let key = "test_2_key1".to_string();
 
-let resp = client.put(key.clone(), value.clone()).await.unwrap();
-assert_eq!(resp, request_msg::ServerResponse::Base(request_msg::BaseResp{
-    id: 0,
-    status: http::StatusCode::OK,
-    message: "No Error".to_string(),
-}))
+_ = client.put(key.clone(), value.clone()).await.unwrap();
+
+let get_resp = client.get(key.clone()).await.unwrap();
+// [1, 2, 3, 4, 5] wrapped into ServerResponse
+print!("{:?}", get_resp);
+
+// topic to subscribe to using NATS
+let sub_resp = client.subscribe(key.clone()).await.unwrap();
+print!("{:?}", sub_resp);
+
+_ = client.delete(key.clone()).await.unwrap();
+```
+
+### Can I use it between threads inside one program?
+
+Yep, you can use channels to communicate with server
+
+```rust
+let temp_dir = TempDir::new().expect("Failed to create temporary directory");
+let nats_url = env::var("NATS_URL")
+            .unwrap_or_else(|_| "nats://localhost:4222".to_string());
+
+let srv = Server::new(nats_url.to_string(), temp_dir.path().to_path_buf()).await.unwrap();
+
+let put_tx = srv.put_tx();
+let get_tx = srv.get_tx();
+let del_tx = srv.del_tx();
+
+let value: Box<[u8]> = Box::new([1, 2, 3, 4, 5]);
+let key = "key1".to_string();
+let (resp_tx, mut resp_rx) = mpsc::channel(1);
+
+let _ = put_tx.send(PutMsg{key: key.clone(), value: value.clone(), resp_tx: resp_tx.clone()});
+
+let message = resp_rx.recv().await.unwrap();
+// nkv::NotifyKeyValueError::NoError
+print!("{:?}", message);
+
+let (get_resp_tx, mut get_resp_rx) = mpsc::channel(1);
+let _ = get_tx.send(GetMsg{key: key.clone(), resp_tx: get_resp_tx.clone()});
+let got = get_resp_rx.recv().await.unwrap();
+// [1, 2, 3, 4, 5] 
+print!("{:?}", got.value.unwrap());
+
+let _ = del_tx.send(BaseMsg{key: key.clone(), resp_tx: resp_tx.clone()});
+let got = resp_rx.recv().await.unwrap();
+// nkv::NotifyKeyValueError::NoError
+print!("{:?}", got);
 ```
 
 ### How does it work exactly?
