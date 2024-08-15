@@ -1,4 +1,4 @@
-use tempfile::{TempDir, NamedTempFile};
+use tempfile::NamedTempFile;
 use std::path::{Path, PathBuf};
 use anyhow::{Result, Context};
 use std::sync::Arc;
@@ -69,6 +69,7 @@ fn atomic_write(data: &[u8], filename: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::TempDir;
 
     #[test]
     fn test_persist_value() -> Result<()> {

@@ -15,6 +15,18 @@ tempdir = "0.3"
 tempfile = "3.10.1"
 tokio = { version = "1.39.1", features = ["full"] }
 
+[lib]
+name = "nkv"
+path = "src/lib.rs"
+
+[[bin]]
+name = "nkv-server"
+path = "src/server/main.rs"
+
+[[bin]]
+name = "nkv-client"
+path = "src/client/main.rs"
+
 [profile.release]
 strip = true  # Automatically strip symbols from the binary
 opt-level = "z"  # Optimize for size.
