@@ -14,16 +14,43 @@ When you have some shared state between services/processes and you also want to 
 
 ### How do I use it?
 
-You can create server and then use clients to access it. Server can run in a separate process, thread 
+Start a server by running the binary `nkv-server`, passing it the hostname and port on which to listen,
+e.g. `localhost:8000`. If you pass none, it defaults to `localhost:4222`. 
+
+```sh
+nkv-server localhost:4222
+```
+
+Then you can use a client to access the server.
+
+You can use the client binary `nkv-client` to interact with the server, or any library that supports the
+protocol.
+
+To run the client binary, you can use the following commands:
+
+```sh
+$ nkv-client localhost:4222
+get key1
+put key1 value1
+delete key1
+quit
+help
+```
+
+Each line starts with the command, followed by the arguments. Enter the `help` command
+for a list of available commands. Each command ends with a newline character, after which the server
+responds.
+
+The first and only argument to `nkv-client` is the hostname and port on which the server is running.
+If none is provided, it defaults to `localhost:4222`.
+
+### How do I use it in my Rust project?
+
+To use the client library in your Rust project:
 
 ```rust
-let temp_dir = TempDir::new().expect("Failed to create temporary directory");
-
-// creates background task where it serves threads
-let _srv = Server::new("localhost:4222".to_string(), temp_dir.path().to_path_buf()).await.unwrap();
-
-let nats_url = "localhost:4222".to_string();
-let client = NatsClient::new(&nats_url).await.unwrap();
+let url = "localhost:4222".to_string();
+let client = nkv::NatsClient::new(&url).await.unwrap();
 
 let value: Box<[u8]> = Box::new([1, 2, 3, 4, 5]);
 let key = "test_2_key1".to_string();
@@ -41,7 +68,17 @@ print!("{:?}", sub_resp);
 _ = client.delete(key.clone()).await.unwrap();
 ```
 
-### Can I use it between threads inside one program?
+To use the server in your rust project:
+
+```rust
+let temp_dir = TempDir::new().expect("Failed to create temporary directory");
+let nats_url = env::var("NATS_URL")
+            .unwrap_or_else(|_| "nats://localhost:4222".to_string());
+
+let srv = nkv::server::Server::new(nats_url.to_string(), temp_dir.path().to_path_buf()).await.unwrap();
+```
+
+### In the server, can I use it between threads inside one program?
 
 Yep, you can use channels to communicate with server
 
@@ -105,6 +142,7 @@ Current implementation is using NATS as backend, which doesn't require client to
 ### Why do you use NATS in `Server` and `Notifier`
 
 ### Background
+
 Initially, idea for such design came up in discussions with @deitch talking about improving messaging
 system inside [EVE project](https://github.com/lf-edge/eve) called PubSub. We clearly understood one thing:
 serverless distributed messaging between services did was not exactly the right way to approach the problem.
