@@ -3,10 +3,10 @@ use std::path::PathBuf;
 
 use std::sync::Arc;
 
+use crate::notifier::{Notifier, WriteStream};
 use crate::persist_value::PersistValue;
-use crate::notifier::Notifier;
 use std::fmt;
-use std::env;
+use std::net::SocketAddr;
 
 #[derive(Debug, PartialEq)]
 pub enum NotifyKeyValueError {
@@ -41,57 +41,62 @@ struct Value {
 
 pub struct NotifyKeyValue {
     state: HashMap<String, Value>,
-    persist_path:  PathBuf,
-    sock_path: String,
+    persist_path: PathBuf,
 }
-
 
 impl NotifyKeyValue {
     pub fn new(path: std::path::PathBuf) -> Self {
-        let nats_url = env::var("NATS_URL")
-                    .unwrap_or_else(|_| "nats://localhost:4222".to_string());
-        Self{
+        Self {
             state: HashMap::new(),
             persist_path: path,
-            sock_path: nats_url,
         }
     }
 
     pub async fn put(&mut self, key: &str, value: Box<[u8]>) {
         if let Some(val) = self.state.get_mut(key) {
-            let _ = val.pv.update(value);
-            let _ = val.notifier.send_update(&*val.pv.data());
+            // TODO: Maybe we can use reference?
+            // so that we don't have to clone
+            let _ = val.pv.update(value.clone());
+            let _ = val.notifier.send_update(value).await;
         } else {
             let path = self.persist_path.join(key);
             let val = PersistValue::new(value, path).expect("TOREMOVE");
+            let notifier = Notifier::new();
 
-            let notifier = Notifier::new(self.sock_path.clone(), format!("pub-{}", key).into()).await.expect("TOREMOVE");
-            self.state.insert(key.to_string(), Value{
-                pv: val,
-                notifier: notifier,
-            });
+            self.state
+                .insert(key.to_string(), Value { pv: val, notifier });
         }
     }
 
     pub fn get(&self, key: &str) -> Option<Arc<[u8]>> {
-        self.state.get(key).map(|value| Arc::clone(&value.pv.data()))
+        self.state
+            .get(key)
+            .map(|value| Arc::clone(&value.pv.data()))
     }
 
     pub fn delete(&mut self, key: &str) {
         self.state.remove(key);
     }
 
-    pub fn subscribe(&mut self, key: &str) -> Option<String> {
-        self.state.get(key).map(|value| value.notifier.topic())
+    pub async fn subscribe(&mut self, key: &str, addr: SocketAddr, stream: WriteStream) {
+        if let Some(val) = self.state.get_mut(key) {
+            val.notifier.subscribe(addr, stream).await;
+        }
+    }
+
+    pub async fn unsubscribe(&mut self, key: &str, addr: &SocketAddr) {
+        if let Some(val) = self.state.get_mut(key) {
+            val.notifier.unsubscribe(addr).await;
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use tokio;
     use anyhow::Result;
     use tempfile::TempDir;
+    use tokio;
 
     #[tokio::test]
     async fn test_put_and_get() -> Result<()> {
@@ -103,9 +108,9 @@ mod tests {
 
         let result = nkv.get("key1");
         assert_eq!(result, Some(Arc::from(data)));
-        
+
         Ok(())
-    }   
+    }
 
     #[tokio::test]
     async fn test_get_nonexistent_key() -> Result<()> {

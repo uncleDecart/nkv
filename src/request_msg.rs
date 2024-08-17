@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use http::StatusCode;
+use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Serialize)]
 pub struct BaseMessage {
@@ -16,7 +16,7 @@ pub struct PutMessage {
 
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(tag = "type")]
-pub enum MessageBody {
+pub enum ServerRequest {
     Put(PutMessage),
     Get(BaseMessage),
     Delete(BaseMessage),
@@ -35,15 +35,14 @@ pub struct BaseResp {
 #[derive(Debug, Deserialize, Serialize, PartialEq)]
 pub struct DataResp {
     #[serde(flatten)]
-    pub base: BaseResp,    
+    pub base: BaseResp,
     pub data: Vec<u8>,
 }
-
 
 #[derive(Debug, Deserialize, Serialize, PartialEq)]
 pub enum ServerResponse {
     Base(BaseResp),
     Get(DataResp),
     Put(DataResp),
-    Sub(DataResp),
+    Sub(BaseResp),
 }
