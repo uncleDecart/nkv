@@ -15,7 +15,7 @@ async fn main() {
     } else {
         DEFAULT_URL
     };
-    let client = NatsClient::new(&url).await.unwrap();
+    let mut client = NatsClient::new(&url).await.unwrap();
 
     loop {
         let mut input = String::new();

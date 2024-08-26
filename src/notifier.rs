@@ -2,124 +2,177 @@ extern crate serde;
 extern crate serde_json;
 
 use serde::{Deserialize, Serialize};
+use serde_json::to_vec;
+use std::collections::HashMap;
+use std::net::SocketAddr;
+use std::sync::Arc;
+use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncWriteExt, BufWriter};
+use tokio::net::TcpStream;
+use tokio::sync::mpsc;
+use tokio::sync::Mutex;
+use tokio::time::{sleep, Duration};
 
 #[derive(Serialize, Deserialize, Debug, PartialEq)]
-enum MessageType<T>
-where
-    T: Serialize,
-{
+pub enum Message {
     Hello,
-    Update { value: T },
+    Update { value: Box<[u8]> },
     Close,
 }
 
-#[derive(Serialize, Deserialize, Debug, PartialEq)]
-struct Message<T>
-where
-    T: Serialize,
-{
-    msg_type: MessageType<T>,
-}
+pub type WriteStream = BufWriter<tokio::io::WriteHalf<tokio::net::TcpStream>>;
 
 pub struct Notifier {
-    nats_connection: async_nats::Client,
-    nats_url: String,
-    topic: String,
+    clients: Arc<Mutex<HashMap<SocketAddr, WriteStream>>>,
 }
 
 impl Notifier {
-    pub async fn new(nats_url: String, topic: String) -> Result<Self, async_nats::Error> {
-        let nats_connection = async_nats::connect(&nats_url).await?;
-
-        Ok(Self {
-            nats_connection,
-            nats_url,
-            topic
-        })
-    }
-    
-    async fn send_message<T>(&self, message: &Message<T>) -> Result<(), async_nats::Error>
-    where
-        T: Serialize,
-    {
-        let serialized = serde_json::to_string(message)?;
-
-        // Publish the message to the NATS topic
-        self.nats_connection
-            .publish(self.topic.clone(), serialized.into())
-            .await?;
-    
-        Ok(())
+    pub fn new() -> Self {
+        Self {
+            clients: Arc::new(Mutex::new(HashMap::new())),
+        }
     }
 
-    pub async fn send_hello(&self) -> Result<(), async_nats::Error> {
-        let message = Message {
-            msg_type: MessageType::<u8>::Hello,
-        };
-
-        self.send_message(&message).await
+    pub async fn subscribe(&self, addr: SocketAddr, stream: WriteStream) {
+        let mut subscribers = self.clients.lock().await;
+        subscribers.insert(addr, stream);
     }
 
-    pub async fn send_update<T>(&self, new_value: T) -> Result<(), async_nats::Error>
-    where
-        T: Serialize,
-    {
-        let message = Message {
-            msg_type: MessageType::Update { value: new_value },
-        };
-        self.send_message(&message).await
+    pub async fn unsubscribe(&self, addr: &SocketAddr) {
+        let mut clients = self.clients.lock().await;
+        clients.remove(addr);
     }
 
-    pub async fn send_close(&self) -> Result<(), async_nats::Error> {
-        let message = Message {
-            msg_type: MessageType::<u8>::Close,
-        };
-        self.send_message(&message).await
+    async fn broadcast_message(&mut self, message: &Message) {
+        let json_bytes = to_vec(&message).unwrap();
+
+        let mut failed_addrs = Vec::new();
+        let mut clients = self.clients.lock().await;
+        for (addr, stream) in clients.iter_mut() {
+            if let Err(e) = stream.write_all(&json_bytes).await {
+                eprintln!("Failed to send message {} {}", addr, e);
+                failed_addrs.push(addr.clone());
+                continue;
+            }
+            if let Err(e) = stream.flush().await {
+                eprintln!("Failed to FLUSH {} {}", addr, e);
+                failed_addrs.push(addr.clone());
+            }
+        }
+
+        for addr in failed_addrs {
+            self.unsubscribe(&addr).await;
+        }
     }
 
-    pub fn topic(&self) -> String {
-        self.topic.clone()
+    pub async fn send_hello(&mut self) {
+        self.broadcast_message(&Message::Hello).await
+    }
+
+    pub async fn send_update(&mut self, new_value: Box<[u8]>) {
+        self.broadcast_message(&Message::Update { value: new_value })
+            .await;
+    }
+
+    pub async fn send_close(&mut self) {
+        self.broadcast_message(&Message::Close).await
     }
 }
 
-impl Drop for Notifier {
-    fn drop(&mut self) {
-        let _ = self.send_close();
+// impl Drop for Notifier {
+//     fn drop(&mut self) {
+//         let _ = self.send_close().await;
+//     }
+// }
+
+pub struct Subscriber {
+    addr: String,
+    tx: mpsc::UnboundedSender<Message>,
+}
+
+impl Subscriber {
+    pub fn new(addr: &str) -> (Self, mpsc::UnboundedReceiver<Message>) {
+        let (tx, rx) = mpsc::unbounded_channel::<Message>();
+        (
+            Self {
+                addr: addr.to_string(),
+                tx,
+            },
+            rx,
+        )
+    }
+
+    pub async fn start(&mut self) {
+        loop {
+            match self.connect().await {
+                Ok(_) => println!("|---- Disconnected, trying to recconect..."),
+                Err(e) => println!("|---- Failed to connect: {}", e),
+            }
+            sleep(Duration::from_secs(1)).await;
+        }
+    }
+
+    async fn connect(&self) -> tokio::io::Result<()> {
+        let mut stream = TcpStream::connect(&self.addr).await?;
+
+        let mut buffer = [0; 1024];
+        loop {
+            let n = stream.read(&mut buffer).await?;
+            if n == 0 {
+                continue;
+            }
+            self.parse_message(&buffer[..n]);
+        }
+    }
+
+    fn parse_message(&self, message: &[u8]) {
+        match serde_json::from_slice::<Message>(message) {
+            Ok(msg) => {
+                _ = self.tx.send(msg);
+            }
+            Err(e) => {
+                eprintln!("Failed to parse message: {}", e);
+            }
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
+
+    use tokio::net::TcpListener;
+
     use super::*;
-    use std::env;
-
-    // Helper function to create a Notifier instance for testing
-    async fn create_test_notifier() -> Notifier {
-        let nats_url = env::var("NATS_URL")
-                    .unwrap_or_else(|_| "nats://localhost:4222".to_string());
-
-        let notifier = Notifier::new(nats_url, "topic".into()).await.unwrap();
-        notifier
-    }
-
-    #[tokio::test]
-    async fn test_send_hello() {
-        let notifier = create_test_notifier().await;
-        assert!(notifier.send_hello().await.is_ok());
-    }
 
     #[tokio::test]
     async fn test_send_update() {
-        let notifier = create_test_notifier().await;
-        let update_message = Message {
-            msg_type: MessageType::Update { value: "update".to_string() },
-        };
-        assert!(notifier.send_message(&update_message).await.is_ok());
-    }
+        let srv_addr: SocketAddr = "127.0.0.1:8090"
+            .parse()
+            .expect("Unable to parse socket address");
 
-    #[tokio::test]
-    async fn test_send_close() {
-        let notifier = create_test_notifier().await;
-        assert!(notifier.send_close().await.is_ok());
+        let mut notifier = Notifier::new();
+        let (mut subscriber, mut rx) = Subscriber::new(srv_addr.to_string().as_str());
+        let listener = TcpListener::bind(srv_addr).await.unwrap();
+        let val: Box<[u8]> = "Bazinga".to_string().into_bytes().into_boxed_slice();
+        let vc = val.clone();
+
+        tokio::spawn(async move {
+            subscriber.start().await;
+        });
+
+        tokio::spawn(async move {
+            let (stream, addr) = listener.accept().await.unwrap();
+            let (_, write_half) = tokio::io::split(stream);
+            let writer = BufWriter::new(write_half);
+            notifier.subscribe(addr, writer).await;
+            notifier.send_update(vc.clone()).await;
+            sleep(Duration::from_secs(1)).await;
+        });
+
+        if let Some(msg) = rx.recv().await {
+            assert_eq!(msg, Message::Update { value: val });
+        } else {
+            panic!("Did not receive the expected message");
+        }
     }
 }
