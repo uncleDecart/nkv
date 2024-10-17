@@ -28,8 +28,8 @@ You can directly pull docker containers for client and server. They are publishe
 Make sure that you have docker [installed](https://docs.docker.com/engine/install/)
 
 ```sh
-docker run -d --net=host uncledecart/nkv:latest ./nkv-server "0.0.0.0:4222"
-docker run -it --net=host uncledecart/nkv:latest ./nkv-client "4222"
+docker run -d --net=host ghcr.io/uncledecart/nkv-main:latest ./nkv-server "0.0.0.0:4222"
+docker run -it --net=host ghcr.io/uncledecart/nkv-main:latest ./nkv-client "4222"
 ```
 
 when using network other than the host, the network implementation may impact network performance, unrelated to nkv itself.
