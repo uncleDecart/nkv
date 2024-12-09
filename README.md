@@ -29,8 +29,8 @@ You can directly pull docker containers for client and server. They are publishe
 Make sure that you have docker [installed](https://docs.docker.com/engine/install/)
 
 ```sh
-docker run -d --net=host ghcr.io/uncledecart/nkv-main:latest ./nkv-server "0.0.0.0:4222"
-docker run -it --net=host ghcr.io/uncledecart/nkv-main:latest ./nkv-client "4222"
+docker run -d --net=host ghcr.io/nkval/nkv-main:latest ./nkv-server "0.0.0.0:4222"
+docker run -it --net=host ghcr.io/nkval/nkv-main:latest ./nkv-client "4222"
 ```
 
 when using network other than the host, the network implementation may impact network performance, unrelated to nkv itself.
@@ -52,7 +52,7 @@ For Windows installation on and other methods see [here](https://forge.rust-lang
 Then you can simply do following
 
 ```sh
-git clone git@github.com:uncleDecart/nkv.git
+git clone git@github.com:nkval/nkv.git
 cd nkv
 cargo build --release
 ```
@@ -96,7 +96,7 @@ For detailed info about design you can find [here](./docs/DESIGN.md)
 Apart from application you can use `nkv` in
 
 - [Rust](./docs/CODING_RUST.md)
-- [Golang](https://github.com/uncleDecart/go-nkv)
+- [Golang](https://github.com/nkval/go-nkv)
 
 However, underlying design principle is that `nkv` is using OS primitives, making it possible to write clients in any language. Just write marshalling and demarshalling in JSON and be sure that you can connect to `Server` and handle `Notifier`. For detailed specification on components reffer to this [doc](./docs/DESIGN.md)
 

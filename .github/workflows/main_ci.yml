@@ -44,5 +44,5 @@ jobs:
         with:
           push: true
           tags: |
-            ghcr.io/uncledecart/nkv-main:latest
-            ghcr.io/uncledecart/nkv-main:${{ github.sha }}
+            ghcr.io/nkval/nkv-main:latest
+            ghcr.io/nkval/nkv-main:${{ github.sha }}
