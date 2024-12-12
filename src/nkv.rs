@@ -352,7 +352,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_subsribe() -> Result<()> {
+    async fn test_subscribe() -> Result<()> {
         let temp_dir = TempDir::new()?;
         let storage = FileStorage::new(temp_dir.path().to_path_buf())?;
         let mut nkv = NkvCore::new(storage)?;
@@ -389,7 +389,44 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_unsubsribe() -> Result<()> {
+    async fn test_subscribe_keyspace() -> Result<()> {
+        let temp_dir = TempDir::new()?;
+        let storage = FileStorage::new(temp_dir.path().to_path_buf())?;
+        let mut nkv = NkvCore::new(storage)?;
+
+        let data: Box<[u8]> = Box::new([1, 2, 3, 4, 5]);
+        nkv.put("ks1.ks2.ks3.k", data).await?;
+
+        let mut rx = nkv.subscribe("ks1", "uuid1".to_string()).await?;
+        if let Some(msg) = rx.recv().await {
+            assert_eq!(msg, Message::Hello)
+        } else {
+            panic!("Should recieve msg");
+        }
+
+        let new_data: Box<[u8]> = Box::new([5, 6, 7, 8, 9]);
+        nkv.put("ks1.ks2.ks4", new_data.clone()).await?;
+
+        if let Some(msg) = rx.recv().await {
+            assert_eq!(
+                msg,
+                Message::Update {
+                    key: "ks1.ks2.ks4".to_string(),
+                    value: new_data.clone()
+                }
+            )
+        } else {
+            panic!("Should recieve msg");
+        }
+
+        let result = nkv.get("ks1.ks2.ks4");
+        assert_eq!(result, vec!(Arc::from(new_data)));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_unsubscribe() -> Result<()> {
         let temp_dir = TempDir::new()?;
         let storage = FileStorage::new(temp_dir.path().to_path_buf())?;
         let mut nkv = NkvCore::new(storage)?;
@@ -462,6 +499,43 @@ mod tests {
         } else {
             panic!("Should recieve msg");
         }
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_keyspace() -> Result<()> {
+        let temp_dir = TempDir::new()?;
+        let storage = FileStorage::new(temp_dir.path().to_path_buf())?;
+        let mut nkv = NkvCore::new(storage)?;
+
+        let data1: Box<[u8]> = Box::new([1, 2, 3, 4, 5]);
+        let data2: Box<[u8]> = Box::new([6, 7, 8, 9, 10]);
+        let data3: Box<[u8]> = Box::new([11, 12, 13, 14, 15]);
+        // ks1 -> ks2 -> ks3 -> ks4 -> k
+        //     |         \             -> data1
+        //     -> data2  |
+        //                -> data3
+        nkv.put("ks1.ks2.ks3.ks4.k", data1.clone()).await?;
+        nkv.put("ks1", data2.clone()).await?;
+        nkv.put("ks1.ks2", data3.clone()).await?;
+
+        let result = nkv.get("ks1.ks2.ks3.ks4.k");
+        assert_eq!(result, vec!(Arc::from(data1.clone())));
+
+        let result = nkv.get("ks1.*");
+        assert!(result.iter().any(|x| &**x == data1.as_ref()));
+        assert!(result.iter().any(|x| &**x == data2.as_ref()));
+        assert!(result.iter().any(|x| &**x == data3.as_ref()));
+
+        let result = nkv.get("*");
+        assert!(result.iter().any(|x| &**x == data1.as_ref()));
+        assert!(result.iter().any(|x| &**x == data2.as_ref()));
+        assert!(result.iter().any(|x| &**x == data3.as_ref()));
+
+        let result = nkv.get("ks1.ks2.*");
+        assert!(result.iter().any(|x| &**x == data1.as_ref()));
+        assert!(result.iter().any(|x| &**x == data3.as_ref()));
 
         Ok(())
     }

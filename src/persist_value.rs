@@ -116,6 +116,10 @@ fn atomic_write(data: &[u8], filename: &Path) -> std::io::Result<()> {
     let mut tmp_file = NamedTempFile::new()?;
     tmp_file.write_all(data)?;
 
+    if let Some(parent) = filename.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
     let tmp_path = tmp_file.path();
     fs::rename(tmp_path, filename)?;
     Ok(())
@@ -134,6 +138,58 @@ mod tests {
         let original_data: Box<[u8]> = Box::new([1, 2, 3, 4, 5]);
 
         let key = "key1";
+        fs.put(key, original_data.clone())
+            .expect("Failed to put data");
+
+        let file_path = dir.path().join(FileStorage::key_to_path(key));
+        let data_from_file = fs::read(file_path.clone()).expect("Failed to read from filepath");
+        assert_eq!(data_from_file, original_data.as_ref());
+
+        let got = fs.get(key);
+        let arc_vec: Vec<Arc<[u8]>> = vec![Arc::from(original_data)];
+        assert_eq!(got, arc_vec);
+
+        let new_data: Box<[u8]> = Box::new([6, 7, 8, 9, 10]);
+        fs.put(key, new_data.clone())
+            .expect("Failed to update data");
+
+        let data_from_file = fs::read(file_path.clone()).expect("Failed to read from filepath");
+        assert_eq!(data_from_file, new_data.as_ref());
+
+        let got = fs.get(key);
+        let arc_vec: Vec<Arc<[u8]>> = vec![Arc::from(new_data)];
+        assert_eq!(got, arc_vec);
+
+        fs.delete(key).expect("Failed to delete value");
+        assert!(!file_path.exists());
+
+        dir.close().expect("Failed to remove temproraty directory");
+    }
+
+    #[test]
+    fn test_file_storage_key_to_path_to_key() {
+        let key = "keyspace1.keyspace2.keyspace3.keyspace4.keyspace5.key";
+        let path = "keyspace1/keyspace2/keyspace3/keyspace4/keyspace5/key.json";
+        let prefix = "some/kind/of/folders/";
+
+        assert_eq!(path, FileStorage::key_to_path(key));
+        assert_eq!(
+            key,
+            FileStorage::path_to_key(
+                &PathBuf::from(prefix.to_string() + path),
+                &PathBuf::from(prefix)
+            )
+        )
+    }
+
+    #[test]
+    fn test_file_storage_keyspace() {
+        let dir = TempDir::new().expect("Failed to create temprorary directory");
+        let path = dir.path().to_path_buf();
+        let mut fs = FileStorage::new(path).expect("Failed to create FileStorage");
+        let original_data: Box<[u8]> = Box::new([1, 2, 3, 4, 5]);
+
+        let key = "keyspace1.keyspace2.keyspace3.keyspace4.keyspace5";
         fs.put(key, original_data.clone())
             .expect("Failed to put data");
 
