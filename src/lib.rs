@@ -20,7 +20,7 @@ use crate::request_msg::*;
 use std::collections::HashMap;
 use std::fmt;
 use std::str;
-use tokio::net::TcpStream;
+use tokio::net::UnixStream;
 // use tokio_util::codec::{Framed, LengthDelimitedCodec};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use uuid::Uuid;
@@ -156,7 +156,7 @@ impl NkvClient {
     }
 
     async fn send_request(&mut self, request: &ServerRequest) -> tokio::io::Result<ServerResponse> {
-        let stream = TcpStream::connect(&self.addr).await?;
+        let stream = UnixStream::connect(&self.addr).await?;
         let (reader, mut writer) = stream.into_split();
 
         let mut buf_reader = BufReader::new(reader);

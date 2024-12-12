@@ -335,12 +335,26 @@ impl FromStr for ServerResponse {
     }
 }
 
-#[derive(Debug, PartialEq, Clone)]
+#[derive(PartialEq, Clone)]
 pub enum Message {
     Hello,
     Update { key: String, value: Box<[u8]> },
     Close { key: String },
     NotFound,
+}
+
+impl fmt::Debug for Message {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        match self {
+            Self::Hello => write!(f, "HELLO"),
+            Self::Update { key, value } => match std::str::from_utf8(value) {
+                Ok(val) => write!(f, "UPDATE {} {}", key, val),
+                Err(_) => write!(f, "UPDATE {} {:?}", key, value),
+            },
+            Self::Close { key } => write!(f, "CLOSE {}", key),
+            Self::NotFound => write!(f, "NOTFOUND"),
+        }
+    }
 }
 
 impl fmt::Display for Message {

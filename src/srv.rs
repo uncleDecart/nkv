@@ -6,10 +6,12 @@
 // format you can check request_msg.rs
 
 use std::collections::HashMap;
-use std::net::SocketAddr;
+use std::os::unix::fs::FileTypeExt;
+use std::path::Path;
 use std::sync::Arc;
+use tokio::fs;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
-use tokio::net::TcpListener;
+use tokio::net::UnixListener;
 use tokio::sync::{mpsc, oneshot};
 
 use crate::errors::NotifyKeyValueError;
@@ -49,7 +51,7 @@ pub struct SubMsg {
 
 // Note that IP addr is locked only when serve is called
 pub struct Server {
-    addr: SocketAddr,
+    addr: String,
     put_tx: mpsc::UnboundedSender<PutMsg>,
     get_tx: mpsc::UnboundedSender<GetMsg>,
     del_tx: mpsc::UnboundedSender<BaseMsg>,
@@ -73,7 +75,24 @@ impl Server {
 
         let storage = FileStorage::new(path)?;
         let mut nkv = NkvCore::new(storage)?;
-        let addr: SocketAddr = addr.parse().expect("Unable to parse addr");
+
+        let socket_path = Path::new(&addr);
+
+        if let Ok(metadata) = fs::metadata(socket_path).await {
+            let file_type = metadata.file_type();
+            if file_type.is_socket() {
+                fs::remove_file(socket_path).await?;
+            } else {
+                return Err(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "Path exists but is not a Unix socket",
+                ));
+            }
+        }
+
+        if let Some(parent) = socket_path.parent() {
+            fs::create_dir_all(parent).await?;
+        }
 
         let srv = Self {
             addr,
@@ -157,7 +176,8 @@ impl Server {
     }
 
     pub async fn serve(&mut self) {
-        let listener = TcpListener::bind(self.addr).await.unwrap();
+        let listener = UnixListener::bind(&self.addr).unwrap();
+        println!("listening on {}", self.addr);
         loop {
             let put_tx = self.put_tx();
             let get_tx = self.get_tx();
@@ -183,7 +203,7 @@ impl Server {
     }
 
     async fn handle_request(
-        stream: tokio::net::TcpStream,
+        stream: tokio::net::UnixStream,
         put_tx: mpsc::UnboundedSender<PutMsg>,
         get_tx: mpsc::UnboundedSender<GetMsg>,
         del_tx: mpsc::UnboundedSender<BaseMsg>,
@@ -363,16 +383,22 @@ mod tests {
     use crate::request_msg::Message;
     use crate::NkvClient;
     use tempfile::TempDir;
-    use tokio::{self, net::TcpStream};
+    use tokio::{self, net::UnixStream};
 
     #[tokio::test]
     async fn test_server() {
+        // let temp_dir = tempdir().unwrap();
         let temp_dir = TempDir::new().expect("Failed to create temporary directory");
-        let url = "127.0.0.1:8091";
+        let url = temp_dir.path().join("socket.sock");
+        // let url = temp_socket.to_str().unwrap();
+        // let url = "/tmp/nkv-sock-test-srv";
 
-        let (mut srv, _cancel) = Server::new(url.to_string(), temp_dir.path().to_path_buf())
-            .await
-            .unwrap();
+        let (mut srv, _cancel) = Server::new(
+            url.to_str().unwrap().to_string(),
+            temp_dir.path().to_path_buf(),
+        )
+        .await
+        .unwrap();
 
         let put_tx = srv.put_tx();
         let get_tx = srv.get_tx();
@@ -407,7 +433,7 @@ mod tests {
         assert_eq!(got.value, vec!(Arc::from(value)));
 
         // create sub
-        let stream = TcpStream::connect(&url).await.unwrap();
+        let stream = UnixStream::connect(&url).await.unwrap();
         let (_, write) = tokio::io::split(stream);
         let writer = BufWriter::new(write);
         let uuid = "MY_AWESOME_UUID".to_string();
@@ -440,11 +466,14 @@ mod tests {
     #[tokio::test]
     async fn test_client_server() {
         let temp_dir = TempDir::new().expect("Failed to create temporary directory");
-        let url = "127.0.0.1:8092";
+        let url = temp_dir.path().join("socket.sock");
 
-        let (mut srv, _cancel) = Server::new(url.to_string(), temp_dir.path().to_path_buf())
-            .await
-            .unwrap();
+        let (mut srv, _cancel) = Server::new(
+            url.to_str().unwrap().to_string(),
+            temp_dir.path().to_path_buf(),
+        )
+        .await
+        .unwrap();
         tokio::spawn(async move {
             srv.serve().await;
         });
@@ -452,7 +481,7 @@ mod tests {
         // Give time for server to get up
         // TODO: need to create a notification channel
         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
-        let mut client = NkvClient::new(&url);
+        let mut client = NkvClient::new(url.to_str().unwrap());
 
         let value: Box<[u8]> = Box::new([9, 7, 3, 4, 5]);
         let key = "test_2_key1".to_string();

@@ -1,9 +1,9 @@
-use std::env;
+use std::{env, fs};
 use tempfile::TempDir;
 
 use nkv::srv;
 
-const DEFAULT_URL: &str = "127.0.0.1:4222";
+const DEFAULT_URL: &str = "/tmp/nkv/nkv.sock";
 
 #[tokio::main(flavor = "multi_thread")]
 async fn main() {
@@ -14,6 +14,9 @@ async fn main() {
     } else {
         DEFAULT_URL
     };
+    if fs::metadata(url).is_ok() {
+        fs::remove_file(url).expect("Failed to remove old socket");
+    }
 
     let temp_dir = TempDir::new().expect("Failed to create temporary directory");
 
