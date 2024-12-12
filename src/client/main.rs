@@ -5,7 +5,7 @@ use nkv::request_msg::Message;
 use nkv::NkvClient;
 use std::time::Instant;
 
-const DEFAULT_URL: &str = "127.0.0.1:4222";
+const DEFAULT_URL: &str = "/tmp/nkv/nkv.sock";
 
 #[tokio::main(flavor = "multi_thread")]
 async fn main() {
@@ -16,6 +16,7 @@ async fn main() {
     } else {
         DEFAULT_URL
     };
+
     let mut client = NkvClient::new(&url);
 
     println!("Please enter the command words separated by whitespace, finish with a character return. Enter HELP for help:");

@@ -25,6 +25,7 @@ use std::sync::Arc;
 
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, BufWriter};
 use tokio::net::TcpStream;
+use tokio::net::UnixStream;
 use tokio::sync::{mpsc, watch, Mutex};
 use tokio::time::{sleep, Duration};
 
@@ -55,7 +56,7 @@ impl<T> StateBuf<T> {
     }
 }
 
-pub type TcpWriter = BufWriter<tokio::io::WriteHalf<tokio::net::TcpStream>>;
+pub type TcpWriter = BufWriter<tokio::io::WriteHalf<tokio::net::UnixStream>>;
 
 #[derive(Debug)]
 pub struct Notifier {
@@ -224,7 +225,7 @@ impl Subscriber {
     }
 
     async fn connect(&self) -> tokio::io::Result<()> {
-        let stream = TcpStream::connect(&self.addr).await?;
+        let stream = UnixStream::connect(&self.addr).await?;
         let (read_half, write_half) = stream.into_split();
         let mut writer = BufWriter::new(write_half);
         let mut reader = BufReader::new(read_half);
@@ -272,15 +273,14 @@ impl Subscriber {
 mod tests {
     use super::*;
     use crate::nkv::Notification;
-    use std::net::SocketAddr;
+    use tempfile::tempdir;
     use tokio::io::split;
-    use tokio::net::TcpListener;
+    use tokio::net::UnixListener;
 
     #[tokio::test]
     async fn test_send_update() {
-        let srv_addr: SocketAddr = "127.0.0.1:8090"
-            .parse()
-            .expect("Unable to parse socket address");
+        let temp_dir = tempdir().unwrap();
+        let srv_addr = temp_dir.path().join("socket.sock");
         let key = "AWESOME_KEY".to_string();
         let uuid = "AWESOME_UUID".to_string();
 
@@ -288,8 +288,8 @@ mod tests {
         let rx = notification.subscribe("uuid1".to_string()).unwrap();
 
         let notifier = Notifier::new(rx);
-        let (mut subscriber, mut rx) = Subscriber::new(srv_addr.to_string().as_str(), &key, &uuid);
-        let listener = TcpListener::bind(srv_addr).await.unwrap();
+        let (mut subscriber, mut rx) = Subscriber::new(srv_addr.to_str().unwrap(), &key, &uuid);
+        let listener = UnixListener::bind(srv_addr).unwrap();
         let val: Box<[u8]> = "Bazinga".to_string().into_bytes().into_boxed_slice();
         let vc = val.clone();
 
