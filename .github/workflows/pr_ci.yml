@@ -47,7 +47,7 @@ jobs:
 
       - name: Run benchmarks on PR branch
         run: |
-          git checkout ${{ github.event.pull_request.head.ref }}
+          git checkout -
           cargo bench
 
       - name: Upload benchmark results
