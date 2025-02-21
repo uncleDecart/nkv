@@ -35,3 +35,15 @@ typed data as well as textual messages. [1](https://docs.rs/tracing/latest/traci
 Another important assumption is that nkv would be deployed in a multi-service architecture
 where log collection is not trivial, hence we want to give developers flexibility of adding
 different sinks to write logs to.
+
+### StorageEngine
+
+### How does FileStorage work?
+
+FileStorage implements StorageEngine and allows to save state on disk main feature of this structure is to allow saving files atomically, so there will be no corrupted files saved.
+
+- First, two directories in the root directory are created: ingest and digest.
+- Each file stored is written to ingest path
+- Then that file is renamed to the same location in digest path
+
+All of this is done in write_atomic function, since renaming is atomic operation in OS context, there won't be any corrupted files, we create two directories in specified root folder, because renaming could only be done within the _same_ file system.
