@@ -43,7 +43,7 @@ async fn main() {
     let allowed_flags = vec![
         "dir".to_string(),
         "help".to_string(),
-        "sock".to_string(),
+        "addr".to_string(),
         "logs".to_string(),
         "level".to_string(),
     ];
@@ -80,7 +80,7 @@ async fn main() {
         return;
     }
 
-    let sock_path = match flags.get("sock") {
+    let sock_path = match flags.get("addr") {
         Some(&Some(ref val)) => val.clone(),
         _ => DEFAULT_URL.to_string(),
     };
